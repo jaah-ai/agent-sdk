@@ -191,8 +191,10 @@ personal data, **never merge it and never enable auto-merge**. Instead:
   stdout/stderr. Without `$JAAH_AGENT_EVENTS` (a local dry run) lines go to stderr.
 - **Secrets are masked.** Every secret value `credential()` returned is replaced with
   `<redacted:<credential name>>` in everything the SDK writes or sends: log lines and data, `notify`,
-  `ask`, `settle` and `fail` text. `sdk` events carry names and counts, never values. Masking matches exact
-  values only: never print an encoded or partial secret yourself.
+  `ask`, `settle` (every field) and `fail` text, and every events-file line. `sdk` events carry names and
+  counts, never values. Masking matches exact values of 6+ characters only: never print an encoded or
+  partial secret yourself, and never put one in a file you upload with `artifact` — file contents are not
+  masked.
 
 ## Developing the SDK
 

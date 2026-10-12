@@ -56,6 +56,7 @@ class Wire:
     def _once(self, verb: str, args: dict) -> Any:
         request = (json.dumps({"call": verb, "args": args}, separators=(",", ":")) + "\n").encode()
         timeout = TIMEOUTS_S.get(verb, DEFAULT_TIMEOUT_S)
+        deadline = time.monotonic() + timeout  # the budget is for the whole call, not per recv
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         try:
@@ -68,6 +69,10 @@ class Wire:
                 sock.shutdown(socket.SHUT_WR)
                 buf = b""
                 while b"\n" not in buf and len(buf) < _MAX_REPLY_BYTES:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise socket.timeout(f"no complete reply within {timeout:g}s")
+                    sock.settimeout(remaining)
                     chunk = sock.recv(65536)
                     if not chunk:
                         break

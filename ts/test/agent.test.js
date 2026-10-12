@@ -307,4 +307,43 @@ describe("masking", () => {
     h.agent.log("see https://api.github.com"); // base_url is not a secret: not masked
     assert.equal(h.events().at(-1).message, "see https://api.github.com");
   });
+
+  test("masking covers objects, keys and every settle field", async () => {
+    h.replies["task.credential_get"] = ok({ ...CREDENTIAL, client_secret: "top_level_secret_77" });
+    await h.agent.credential("acme/github");
+    const when = new Date(0);
+    h.agent.log("boom", "error", {
+      err: new Error(`auth failed ${SECRET}`), tags: new Set([SECRET]), [SECRET]: 1, when,
+    });
+    h.agent.reportUsage(`model-${SECRET}`, 1, 1);
+    await h.agent.searchTasks(SECRET);
+    await h.agent.settle("s", "no_pr", {
+      noPrReason: SECRET, noPrEvidence: "e", reconMap: { recon: [{ answer: "top_level_secret_77" }] },
+      summary: `override ${SECRET}`, // a gate key can never replace the named field
+    });
+    const sent = JSON.stringify(h.daemon.calls.slice(1));
+    const eventsText = readFileSync(h.eventsPath, "utf8");
+    for (const blob of [eventsText, sent]) {
+      assert.ok(!blob.includes(SECRET));
+      assert.ok(!blob.includes("top_level_secret_77"));
+    }
+    assert.match(eventsText, /auth failed <redacted:acme\/github>/);
+    assert.equal(h.daemon.calls.at(-1)[1].summary, "s");
+    assert.equal(h.events().find((e) => e.type === "log").data.when, String(when)); // not emptied to {}
+  });
+
+  test("dismissed carries no answer, and the timeout is not overshot", async () => {
+    h.replies["agent.ask"] = ok({ ids: [1] });
+    h.replies["agent.answers"] = ok({ rounds: [{ id: 1, status: "dismissed", selections: ["x"], text: "x" }], all_resolved: true });
+    assert.deepEqual(await h.agent.ask([{ question: "q", options: ["a"] }]),
+      [{ status: "dismissed", selections: [], text: "" }]);
+    h.replies["agent.answers"] = ok({ rounds: [{ id: 1, status: "open" }], all_resolved: false });
+    let t = 0;
+    h.agent._clock = () => t;
+    h.agent._sleep = async (s) => { t += s; };
+    await assert.rejects(h.agent.ask([{ question: "q", options: ["a"] }], { pollInterval: 5, timeout: 1 }),
+      (e) => e.name === "TimeoutError");
+    assert.ok(t <= 1);
+    await assert.rejects(h.agent.ask([{ question: "q", options: ["a"] }], { pollInterval: 0 }), RangeError);
+  });
 });

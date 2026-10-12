@@ -42,6 +42,7 @@ export class Agent {
     this._wire = wire;
     this._events = events;
     this._mask = new Masker();
+    this._events.masker = this._mask; // backstop: every events line is masked at the sink too
     this._sleep = sleep;
     this._clock = clock;
   }
@@ -86,6 +87,7 @@ export class Agent {
    * selections — never an empty "answered". Rejects with a TimeoutError if `timeout` seconds pass first.
    */
   async ask(questions, { pollInterval = 5, timeout = null } = {}) {
+    if (!(pollInterval > 0)) throw new RangeError(`pollInterval must be positive, got ${pollInterval}`);
     if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_QUESTIONS) {
       throw new RangeError(`ask takes 1..${MAX_QUESTIONS} questions, got ${questions?.length ?? 0}`);
     }
@@ -114,7 +116,7 @@ export class Agent {
         err.name = "TimeoutError";
         throw err;
       }
-      await this._sleep(pollInterval);
+      await this._sleep(deadline === null ? pollInterval : Math.max(0, Math.min(pollInterval, deadline - this._clock())));
     }
   }
 
@@ -171,21 +173,18 @@ export class Agent {
 
   /** Filters: state, persona, hasArtifacts, artifactKind, limit (snake_case accepted too). */
   async searchTasks(q, filters = {}) {
-    return this._wire.call("task.search", { q, ...snakeKeys(filters) });
+    return this._wire.call("task.search", this._mask.mask({ q, ...snakeKeys(filters) }));
   }
 
   // ── ending ────────────────────────────────────────────────────────────────────────────────────
   /** The ONE terminal call. Make it last: settling frees the slot and the process is ended soon after. */
   async settle(summary, terminalType, { prUrl, noPrReason, noPrEvidence, ...gate } = {}) {
-    const args = snakeKeys({
-      summary: this._mask.mask(summary),
-      terminal_type: terminalType,
-      pr_url: prUrl,
-      no_pr_reason: noPrReason,
-      no_pr_evidence: this._mask.mask(noPrEvidence),
-      ...gate,
-    });
-    const result = await this._wire.call("task.settle", args);
+    const args = {
+      ...snakeKeys(gate),
+      ...snakeKeys({ summary, terminal_type: terminalType, pr_url: prUrl, no_pr_reason: noPrReason, no_pr_evidence: noPrEvidence }),
+    };
+    // Every field is masked, the free-form gate fields (recon_map, ...) included.
+    const result = await this._wire.call("task.settle", this._mask.mask(args));
     this._sdk("settle", { terminal_type: terminalType, settled: Boolean(result && result.settled) });
     return result;
   }
@@ -221,7 +220,8 @@ function toAnswers(ids, rounds) {
     if (!r || (r.status !== "answered" && r.status !== "dismissed")) {
       throw new JaahRefused("bad_reply", `round ${id} is missing or unresolved in a resolved reply`);
     }
-    return { status: r.status, selections: [...(r.selections || [])], text: String(r.text || "") };
+    if (r.status === "dismissed") return { status: "dismissed", selections: [], text: "" }; // carries no answer
+    return { status: "answered", selections: (r.selections || []).map(String), text: String(r.text || "") };
   });
 }
 

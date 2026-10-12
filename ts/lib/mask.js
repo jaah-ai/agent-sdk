@@ -11,6 +11,8 @@ export const NON_SECRET_KEYS = new Set([
   "authorize_url", "token_url", "expiry_date", "token_expires_at", "grant_dead_at",
   "access_token_expires_at",
 ]);
+// Top-level `task.credential_get` fields that describe the row (`nodevault` holds sealed, not clear, values).
+export const DESCRIPTIVE_FIELDS = new Set(["name", "type", "type_label", "description", "nodevault"]);
 // Shorter strings are too likely to occur by accident ("true", "us", "1") to mask safely.
 export const MIN_LENGTH = 6;
 
@@ -21,13 +23,14 @@ export class Masker {
   }
 
   /**
-   * `payload` is `task.credential_get`'s result: the secrets are its `config` and any minted
-   * `access_token`; its `name`/`type` describe the row and are not secret.
+   * `payload` is `task.credential_get`'s result: every field but the descriptive ones (`name`,
+   * `type`, ...) may hold a secret — `config`, a minted `access_token`, any field added later.
    */
   register(name, payload) {
     if (payload && typeof payload === "object" && !Array.isArray(payload) && "config" in payload) {
-      this._collect(name, payload.config, null);
-      this._collect(name, payload.access_token, "access_token");
+      for (const [key, value] of Object.entries(payload)) {
+        if (!DESCRIPTIVE_FIELDS.has(key)) this._collect(name, value, key);
+      }
     } else {
       this._collect(name, payload, null);
     }
@@ -44,18 +47,23 @@ export class Masker {
     }
   }
 
+  // Mask every known value in `value`. Anything that is not a plain object, array or JSON scalar (an
+  // Error, a Date, a Buffer, ...) is turned into its string form first — walking its entries would
+  // drop or leak it, and JSON.stringify would serialise it AFTER masking.
   mask(value) {
     if (this._ordered.length === 0) return value;
-    if (typeof value === "string") {
-      for (const [secret, name] of this._ordered) {
-        if (value.includes(secret)) value = value.split(secret).join(`<redacted:${name}>`);
+    if (value == null || typeof value === "boolean" || typeof value === "number") return value;
+    if (Array.isArray(value) || value instanceof Set) return [...value].map((v) => this.mask(v));
+    if (typeof value === "object") {
+      const proto = Object.getPrototypeOf(value);
+      if (proto === Object.prototype || proto === null) {
+        return Object.fromEntries(Object.entries(value).map(([k, v]) => [this.mask(k), this.mask(v)]));
       }
-      return value;
     }
-    if (Array.isArray(value)) return value.map((v) => this.mask(v));
-    if (value && typeof value === "object") {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.mask(v)]));
+    let text = String(value);
+    for (const [secret, name] of this._ordered) {
+      if (text.includes(secret)) text = text.split(secret).join(`<redacted:${name}>`);
     }
-    return value;
+    return text;
   }
 }

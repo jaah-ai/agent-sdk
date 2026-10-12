@@ -17,13 +17,16 @@ def now_iso() -> str:
 
 
 class EventsFile:
-    def __init__(self, path: str | None) -> None:
+    def __init__(self, path: str | None, masker: Any = None) -> None:
         self.path = path
+        self.masker = masker  # the agent's Masker: every line is masked here, at the one sink
 
     def write(self, line: dict[str, Any]) -> None:
+        if self.masker is not None:
+            line = self.masker.mask(line)
         record = {"type": line["type"], "timestamp": now_iso(),
                   **{k: v for k, v in line.items() if k != "type"}}
-        data = (json.dumps(record, separators=(",", ":"), ensure_ascii=False, default=str) + "\n").encode()
+        data = (json.dumps(record, separators=(",", ":"), ensure_ascii=False, default=str) + "\n").encode("utf-8", "backslashreplace")
         if not self.path:
             # Not under a node (a local dry run): stderr, which the node supervisor would capture anyway.
             sys.stderr.write(data.decode())

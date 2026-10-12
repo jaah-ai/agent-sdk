@@ -6,12 +6,13 @@ import { closeSync, openSync, writeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 export class EventsFile {
-  constructor(path) {
+  constructor(path, masker = null) {
     this.path = path || null;
+    this.masker = masker; // the agent's Masker: every line is masked here, at the one sink
   }
 
   write(line) {
-    const { type, ...rest } = line;
+    const { type, ...rest } = this.masker ? this.masker.mask(line) : line;
     const record = { type, timestamp: new Date().toISOString(), ...rest };
     const data = Buffer.from(JSON.stringify(record, jsonSafe) + "\n", "utf8");
     if (!this.path) {

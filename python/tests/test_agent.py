@@ -283,6 +283,40 @@ class MaskingTest(Base):
         self.agent.log("see https://api.github.com")
         self.assertEqual(self.events()[-1]["message"], "see https://api.github.com")
 
+    def test_masking_covers_objects_keys_and_every_settle_field(self):
+        cred = dict(CREDENTIAL, client_secret="top_level_secret_77")
+        self.replies["task.credential_get"] = ok(cred)
+        self.agent.credential("acme/github")
+        self.agent.log("boom", err=RuntimeError(f"auth failed {SECRET}"), raw=SECRET.encode(),
+                       tags={SECRET}, **{SECRET: 1})
+        self.agent.report_usage(f"model-{SECRET}", 1, 1)
+        self.agent.search_tasks(SECRET)
+        self.agent.settle("s", "no_pr", no_pr_reason=SECRET, no_pr_evidence="e",
+                          recon_map={"recon": [{"answer": "top_level_secret_77"}]})
+        sent = json.dumps(self.daemon.calls[1:])
+        with open(self.events_path, encoding="utf-8") as fh:
+            events_text = fh.read()
+        for blob in (events_text, sent):
+            self.assertNotIn(SECRET, blob)
+            self.assertNotIn("top_level_secret_77", blob)
+        self.assertIn("auth failed <redacted:acme/github>", events_text)
+
+    def test_dismissed_carries_no_answer_and_timeout_is_not_overshot(self):
+        self.replies["agent.ask"] = ok({"ids": [1]})
+        self.replies["agent.answers"] = ok({"rounds": [{"id": 1, "status": "dismissed", "selections": ["x"],
+                                                        "text": "x"}], "all_resolved": True})
+        self.assertEqual(self.agent.ask([{"question": "q", "options": ["a"]}]),
+                         [{"status": "dismissed", "selections": [], "text": ""}])
+        self.replies["agent.answers"] = ok({"rounds": [{"id": 1, "status": "open"}], "all_resolved": False})
+        t = [0.0]
+        self.agent._clock = lambda: t[0]
+        self.agent._sleep = lambda s: t.__setitem__(0, t[0] + s)
+        with self.assertRaises(TimeoutError):
+            self.agent.ask([{"question": "q", "options": ["a"]}], poll_interval=5, timeout=1)
+        self.assertLessEqual(t[0], 1.0)
+        with self.assertRaises(ValueError):
+            self.agent.ask([{"question": "q", "options": ["a"]}], poll_interval=0)
+
 
 if __name__ == "__main__":
     unittest.main()

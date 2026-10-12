@@ -57,6 +57,7 @@ class Agent:
         self._wire = wire
         self._events = events
         self._mask = Masker()
+        self._events.masker = self._mask  # backstop: every events line is masked at the sink too
         self._sleep = sleep
         self._clock = clock
 
@@ -95,6 +96,8 @@ class Agent:
 
         Returns one Answer per question, in order. A dismissed round is `status: "dismissed"` with no
         selections — never an empty "answered". Raises TimeoutError if `timeout` seconds pass first."""
+        if poll_interval <= 0:
+            raise ValueError(f"poll_interval must be positive, got {poll_interval}")
         if not 1 <= len(questions) <= MAX_QUESTIONS:
             raise ValueError(f"ask takes 1..{MAX_QUESTIONS} questions, got {len(questions)}")
         wire_questions = [self._question(q) for q in questions]
@@ -114,7 +117,8 @@ class Agent:
                 return answers
             if deadline is not None and self._clock() >= deadline:
                 raise TimeoutError(f"questions {ids} were not all resolved within {timeout} seconds")
-            self._sleep(poll_interval)
+            self._sleep(poll_interval if deadline is None else
+                        max(0.0, min(poll_interval, deadline - self._clock())))
 
     def _question(self, q: dict) -> dict:
         if not isinstance(q, dict) or not q.get("question"):
@@ -158,16 +162,17 @@ class Agent:
 
     def search_tasks(self, q: str, **filters: Any) -> Any:
         """Filters: state, persona, has_artifacts, artifact_kind, limit."""
-        return self._wire.call("task.search", {"q": q, **{k: v for k, v in filters.items() if v is not None}})
+        return self._wire.call("task.search", self._mask.mask(
+            {"q": q, **{k: v for k, v in filters.items() if v is not None}}))
 
     # ── ending ───────────────────────────────────────────────────────────────────────────────────
     def settle(self, summary: str, terminal_type: str, *, pr_url: str | None = None,
                no_pr_reason: str | None = None, no_pr_evidence: str | None = None, **gate: Any) -> Any:
         """The ONE terminal call. Make it last: settling frees the slot and the process is ended soon after."""
-        args = {"summary": self._mask.mask(summary), "terminal_type": terminal_type,
-                "pr_url": pr_url, "no_pr_reason": no_pr_reason,
-                "no_pr_evidence": self._mask.mask(no_pr_evidence), **gate}
-        result = self._wire.call("task.settle", {k: v for k, v in args.items() if v is not None})
+        args = {**gate, "summary": summary, "terminal_type": terminal_type, "pr_url": pr_url,
+                "no_pr_reason": no_pr_reason, "no_pr_evidence": no_pr_evidence}
+        # Every field is masked, the free-form gate fields (recon_map, ...) included.
+        result = self._wire.call("task.settle", self._mask.mask({k: v for k, v in args.items() if v is not None}))
         self._sdk("settle", {"terminal_type": terminal_type,
                              "settled": bool(isinstance(result, dict) and result.get("settled"))})
         return result
@@ -200,6 +205,9 @@ def _answers(ids: list[int], rounds: list[dict]) -> list[Answer]:
         r = by_id.get(i)
         if r is None or r.get("status") not in ("answered", "dismissed"):
             raise JaahRefused("bad_reply", f"round {i} is missing or unresolved in a resolved reply")
-        out.append({"status": r["status"], "selections": list(r.get("selections") or []),
-                    "text": str(r.get("text") or "")})
+        if r["status"] == "dismissed":  # a dismissed round carries no answer, whatever the reply says
+            out.append({"status": "dismissed", "selections": [], "text": ""})
+        else:
+            out.append({"status": "answered", "selections": [str(s) for s in r.get("selections") or []],
+                        "text": str(r.get("text") or "")})
     return out

@@ -14,6 +14,8 @@ NON_SECRET_KEYS = frozenset({
     "authorize_url", "token_url", "expiry_date", "token_expires_at", "grant_dead_at",
     "access_token_expires_at",
 })
+# Top-level `task.credential_get` fields that describe the row (`nodevault` holds sealed, not clear, values).
+DESCRIPTIVE_FIELDS = frozenset({"name", "type", "type_label", "description", "nodevault"})
 # Shorter strings are too likely to occur by accident ("true", "us", "1") to mask safely.
 MIN_LENGTH = 6
 
@@ -24,11 +26,12 @@ class Masker:
         self._ordered: list[tuple[str, str]] = []
 
     def register(self, name: str, payload: Any) -> None:
-        """`payload` is `task.credential_get`'s result: the secrets are its `config` and any minted
-        `access_token`; its `name`/`type` describe the row and are not secret."""
+        """`payload` is `task.credential_get`'s result: every field but the descriptive ones (`name`,
+        `type`, ...) may hold a secret — `config`, a minted `access_token`, any field added later."""
         if isinstance(payload, dict) and "config" in payload:
-            self._collect(name, payload.get("config"), None)
-            self._collect(name, payload.get("access_token"), "access_token")
+            for key, value in payload.items():
+                if key not in DESCRIPTIVE_FIELDS:
+                    self._collect(name, value, key)
         else:
             self._collect(name, payload, None)
         self._ordered = sorted(self._values.items(), key=lambda kv: -len(kv[0]))
@@ -44,15 +47,21 @@ class Masker:
             self._values.setdefault(node, name)
 
     def mask(self, value: Any) -> Any:
+        """Mask every known value in `value`. Anything that is not JSON-native (an exception, bytes, a
+        path, ...) is turned into its `str()` first, because the events writer would do that AFTER
+        masking and so carry a secret through in the clear."""
         if not self._ordered:
             return value
-        if isinstance(value, str):
-            for secret, name in self._ordered:
-                if secret in value:
-                    value = value.replace(secret, f"<redacted:{name}>")
+        if value is None or isinstance(value, (bool, int, float)):
             return value
         if isinstance(value, dict):
-            return {k: self.mask(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
+            return {self.mask(str(k)): self.mask(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set, frozenset)):
             return [self.mask(v) for v in value]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "backslashreplace")
+        value = str(value)
+        for secret, name in self._ordered:
+            if secret in value:
+                value = value.replace(secret, f"<redacted:{name}>")
         return value
