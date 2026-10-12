@@ -51,6 +51,16 @@ ctx = agent.task()
 task = ctx["task"]
 agent.log("starting", task_id=task["id"], persona=task["persona"])
 
+
+def finish(summary, evidence):
+    # Upload a report on EVERY path, the decline included: some kinds of task refuse a settle without one.
+    report = os.path.join(os.environ["JAAH_REPORT_DIR"], "report.html")
+    with open(report, "w", encoding="utf-8") as fh:
+        fh.write(f"<!doctype html><title>Hello</title><p>{html.escape(task['title'])}: {html.escape(summary)}</p>")
+    agent.artifact("report", report)
+    agent.settle(summary, "no_pr", no_pr_reason="no_code_needed", no_pr_evidence=evidence)
+
+
 if not task["autonomous"]:                    # Full Auto: decide yourself, never ask
     answers = agent.ask([{                    # blocks until the operator answers or dismisses
         "question": f"Say hello for task {task['id']}?",
@@ -58,21 +68,17 @@ if not task["autonomous"]:                    # Full Auto: decide yourself, neve
         "options": [{"label": "Yes"}, {"label": "No"}],
     }])
     if answers[0]["status"] == "dismissed" or answers[0]["selections"] != ["Yes"]:
-        agent.settle("The operator declined the hello.", "no_pr",
-                     no_pr_reason="no_code_needed", no_pr_evidence="Operator answered No / dismissed.")
+        finish("The operator declined the hello.", "Operator answered No / dismissed.")
         raise SystemExit(0)
 
 agent.notify(f"Hello from {ctx['agent']['display_name']}!")
 agent.report_usage("my-model-1", input_tokens=120, output_tokens=40)
-
-report = os.path.join(os.environ["JAAH_REPORT_DIR"], "report.html")
-with open(report, "w", encoding="utf-8") as fh:
-    fh.write(f"<!doctype html><title>Hello</title><p>Hello, {html.escape(task['title'])}.</p>")
-agent.artifact("report", report)
-
-agent.settle("Said hello and uploaded a report.", "no_pr",
-             no_pr_reason="no_code_needed", no_pr_evidence="Hello agent: no code change requested.")
+finish("Said hello.", "Hello agent: no code change requested.")
 ```
+
+Upload a report on **every** path that settles, the decline included: a `researcher`,
+`business_analysis`, `architecture`, `plan` or `finish` task refuses a settle without one (the settle is
+refused with the kinds still missing); for `coder` it is optional.
 
 Under **Full Auto** (`task["autonomous"]` true) the agent makes every decision itself. Jaah then accepts
 a question only about a blocker a human must clear (a missing credential or access), with `header` one of
@@ -90,6 +96,15 @@ const ctx = await agent.task();
 const { task } = ctx;
 agent.log("starting", "info", { taskId: task.id });
 
+async function finish(summary, evidence) {
+  // Upload a report on EVERY path, the decline included: some kinds of task refuse a settle without one.
+  const report = join(process.env.JAAH_REPORT_DIR, "report.html");
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  writeFileSync(report, `<!doctype html><title>Hello</title><p>${esc(task.title)}: ${esc(summary)}</p>`);
+  await agent.artifact("report", report);
+  await agent.settle(summary, "no_pr", { noPrReason: "no_code_needed", noPrEvidence: evidence });
+}
+
 if (!task.autonomous) {                       // Full Auto: decide yourself, never ask
   const [answer] = await agent.ask([{         // waits until the operator answers or dismisses
     question: `Say hello for task ${task.id}?`,
@@ -97,24 +112,14 @@ if (!task.autonomous) {                       // Full Auto: decide yourself, nev
     options: [{ label: "Yes" }, { label: "No" }],
   }]);
   if (answer.status === "dismissed" || answer.selections[0] !== "Yes") {
-    await agent.settle("The operator declined the hello.", "no_pr", {
-      noPrReason: "no_code_needed", noPrEvidence: "Operator answered No / dismissed.",
-    });
+    await finish("The operator declined the hello.", "Operator answered No / dismissed.");
     process.exit(0);
   }
 }
 
 await agent.notify(`Hello from ${ctx.agent.display_name}!`);
 agent.reportUsage("my-model-1", 120, 40);
-
-const report = join(process.env.JAAH_REPORT_DIR, "report.html");
-const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-writeFileSync(report, `<!doctype html><title>Hello</title><p>Hello, ${esc(task.title)}.</p>`);
-await agent.artifact("report", report);
-
-await agent.settle("Said hello and uploaded a report.", "no_pr", {
-  noPrReason: "no_code_needed", noPrEvidence: "Hello agent: no code change requested.",
-});
+await finish("Said hello.", "Hello agent: no code change requested.");
 ```
 
 The entrypoint may be `.js`, `.mjs`, or an erasable-syntax `.ts` file (Node ≥ 22.18 strips types itself).
@@ -165,7 +170,7 @@ when `timeout` seconds pass first.
 
 | Error | Meaning | Retry? |
 |---|---|---|
-| `JaahUnavailable` | No answer from the daemon, or the daemon could not reach Jaah. | Yes, later. The SDK already retried what is safe: a connect failure for any call, and any outage for a read-only call. A write (`settle`, `fail`, `notify`, `ask`, `artifact`) is not retried after a lost answer, because it may have landed — check with `task()` before repeating. |
+| `JaahUnavailable` | No answer from the daemon, or the daemon could not reach Jaah. | Yes, later. The SDK already retried what is safe: a connect failure for any call, and any outage for a read-only call. A write (`settle`, `fail`, `notify`, `ask`, `artifact`) is not retried after a lost answer, because it may have landed — look at the task in the Jaah console before repeating it (`task()` returns the task's context, not its state). |
 | `JaahRefused(reason, detail)` | Jaah answered no: `reason` is the coarse code, `detail` Jaah's explanation (e.g. `HTTP 422 …`). | **Never** — the same request earns the same answer. Fix it. |
 | `NotARunner` | The daemon cannot tell which task this process is (see "Don't daemonize"). | No. |
 
