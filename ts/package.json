@@ -1,0 +1,23 @@
+{
+  "name": "@jaah/agent-sdk",
+  "version": "0.1.0",
+  "description": "Jaah Agent SDK: plug any agent into Jaah's governance pipeline.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": ["index.js", "index.d.ts", "lib/"],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  }
+}
