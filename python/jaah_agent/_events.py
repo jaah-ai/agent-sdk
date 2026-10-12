@@ -20,6 +20,7 @@ class EventsFile:
     def __init__(self, path: str | None, masker: Any = None) -> None:
         self.path = path
         self.masker = masker  # the agent's Masker: every line is masked here, at the one sink
+        self._warned = False
 
     def write(self, line: dict[str, Any]) -> None:
         if self.masker is not None:
@@ -31,11 +32,25 @@ class EventsFile:
             # Not under a node (a local dry run): stderr, which the node supervisor would capture anyway.
             sys.stderr.write(data.decode())
             return
-        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
+            # 0640, whatever the umask: the node daemon (the shared gid, not this uid) uploads this file as the
+            # session transcript.
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
+            try:
+                try:
+                    os.fchmod(fd, 0o640)
+                except OSError:
+                    pass  # not ours to chmod: the line still lands
+                os.write(fd, data)
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            # An unwritable events file must never kill the agent: say so once, then keep each line on stderr,
+            # which the node supervisor captures.
+            if not self._warned:
+                self._warned = True
+                sys.stderr.write(f"jaah_agent: cannot write the events file {self.path}: {exc}\n")
+            sys.stderr.write(data.decode())
 
 
 def usage_line(model: str, input_tokens: int, output_tokens: int, cache_read: int, cache_write: int) -> dict:

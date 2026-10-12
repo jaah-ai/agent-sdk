@@ -1,6 +1,6 @@
 // Every §3.8 call against a fake daemon — the twin of python/tests/test_agent.py. Run: node --test 'test/*.test.js'
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -109,6 +109,32 @@ describe("calls", () => {
     assert.deepEqual([line.type, line.level, line.message, line.data], ["log", "warning", "hello", { step: 2 }]);
     assert.match(line.timestamp, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     assert.throws(() => h.agent.log("x", "loud"), RangeError);
+  });
+
+  test("the events file is created 0640", () => {
+    const old = process.umask(0o077);
+    try {
+      h.agent.log("hello");
+    } finally {
+      process.umask(old);
+    }
+    assert.equal(statSync(h.eventsPath).mode & 0o777, 0o640);
+  });
+
+  test("an unwritable events file never kills the agent", async () => {
+    const agent = await connect({ socketPath: h.daemon.path, eventsPath: join(h.tmp, "missing", "events.jsonl") });
+    const written = [];
+    const original = process.stderr.write;
+    process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
+    try {
+      agent.log("first");
+      agent.log("second");
+    } finally {
+      process.stderr.write = original;
+    }
+    const lines = written.join("").trim().split("\n");
+    assert.equal(lines.filter((l) => l.includes("cannot write the events file")).length, 1);
+    assert.deepEqual(lines.filter((l) => l.startsWith("{")).map((l) => JSON.parse(l).message), ["first", "second"]);
   });
 
   test("usage line shape is the contract", () => {

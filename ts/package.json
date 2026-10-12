@@ -1,6 +1,6 @@
 {
   "name": "@jaah/agent-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Jaah Agent SDK: plug any agent into Jaah's governance pipeline.",
   "private": true,
   "license": "UNLICENSED",

@@ -104,6 +104,27 @@ class CallsTest(Base):
         with self.assertRaises(ValueError):
             self.agent.log("x", level="loud")
 
+    def test_events_file_is_created_0640(self):
+        old = os.umask(0o077)
+        try:
+            self.agent.log("hello")
+        finally:
+            os.umask(old)
+        self.assertEqual(os.stat(self.events_path).st_mode & 0o777, 0o640)
+
+    def test_unwritable_events_file_never_kills_the_agent(self):
+        import contextlib
+        import io
+        agent = jaah_agent.connect(socket_path=self.daemon.path,
+                                   events_path=os.path.join(self.tmp, "missing", "events.jsonl"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            agent.log("first")
+            agent.log("second")
+        lines = err.getvalue().splitlines()
+        self.assertEqual(sum("cannot write the events file" in line for line in lines), 1)
+        self.assertEqual([json.loads(line)["message"] for line in lines if line.startswith("{")], ["first", "second"])
+
     def test_usage_line_shape_is_the_contract(self):
         self.agent.report_usage("gpt-5-codex", 1, 2, cache_read=3, cache_write=4)
         (line,) = self.events()
