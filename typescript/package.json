@@ -1,0 +1,39 @@
+{
+  "name": "@jaah/agent-sdk",
+  "version": "2.0.0",
+  "description": "Write an ACP agent that runs on Jaah: implement prompt(), the library speaks ACP and the jaah.ai extension.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaah-ai/agent-sdk.git",
+    "directory": "typescript"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build && cp ../LICENSE LICENSE",
+    "test": "npm run build && node --test 'test/*.test.mjs'"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.9.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "~6.0.3"
+  }
+}

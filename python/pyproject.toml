@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jaah-agent-sdk"
+version = "2.0.0"
+description = "Write an ACP agent that runs on Jaah: implement prompt(), the library speaks ACP and the jaah.ai extension."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["agent-client-protocol>=0.12.1,<0.13"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+]
+
+[project.urls]
+Repository = "https://github.com/jaah-ai/agent-sdk"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jaah_agent"]
+

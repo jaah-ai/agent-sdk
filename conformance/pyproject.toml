@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jaah-acp-conformance"
+version = "2.0.0"
+description = "Conformance suite for ACP agents and the jaah.ai extension: profiles acp-core and jaah-extension."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["agent-client-protocol>=0.12.1,<0.13", "jsonschema>=4.23,<5"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+
+[project.scripts]
+jaah-conformance = "jaah_conformance.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["jaah_conformance"]
+
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
